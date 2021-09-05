@@ -32,21 +32,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
             for peripheral in peripherals.iter() {
                 let properties = peripheral.properties().await?;
                 let is_connected = peripheral.is_connected().await?;
+                let clone = properties.clone();
                 let local_name = properties
                     .unwrap()
                     .local_name
                     .unwrap_or(String::from("(peripheral name unknown)"));
                 println!(
-                    "Peripheral {:?} is connected: {:?}",
-                    local_name, is_connected
+                    "Peripheral {:?} is connected: {:?} props: {:?}",
+                    local_name, is_connected, clone
                 );
-                if !is_connected {
-                    println!("Connecting to peripheral {:?}...", &local_name);
-                    if let Err(err) = peripheral.connect().await {
-                        eprintln!("Error connecting to peripheral, skipping: {}", err);
-                        continue;
-                    }
-                }
+                //if !is_connected {
+                //    println!("Connecting to peripheral {:?}...", &local_name);
+                //    if let Err(err) = peripheral.connect().await {
+                //        eprintln!("Error connecting to peripheral, skipping: {}", err);
+                //        continue;
+                //    }
+                //}
                 let is_connected = peripheral.is_connected().await?;
                 println!(
                     "Now connected ({:?}) to peripheral {:?}...",
