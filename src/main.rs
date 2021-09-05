@@ -1,84 +1,91 @@
 
 
+use std::error::Error;
+use std::time::Duration;
+use tokio::time;
 
+use btleplug::api::{Central, Manager as _, Peripheral};
+use btleplug::platform::Manager;
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    pretty_env_logger::init();
 
-use bluer::{Adapter, AdapterEvent, Address, DeviceEvent};
-use futures::{pin_mut, stream::SelectAll, StreamExt};
-use std::env;
-
-async fn query_device(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
-    let device = adapter.device(addr)?;
-    println!("    Address type:       {}", device.address_type().await?);
-    println!("    Name:               {:?}", device.name().await?);
-    println!("    Icon:               {:?}", device.icon().await?);
-    println!("    Class:              {:?}", device.class().await?);
-    println!("    UUIDs:              {:?}", device.uuids().await?.unwrap_or_default());
-    println!("    Paried:             {:?}", device.is_paired().await?);
-    println!("    Connected:          {:?}", device.is_connected().await?);
-    println!("    Trusted:            {:?}", device.is_trusted().await?);
-    println!("    Modalias:           {:?}", device.modalias().await?);
-    println!("    RSSI:               {:?}", device.rssi().await?);
-    println!("    TX power:           {:?}", device.tx_power().await?);
-    println!("    Manufacturer data:  {:?}", device.manufacturer_data().await?);
-    println!("    Service data:       {:?}", device.service_data().await?);
-    Ok(())
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> bluer::Result<()> {
-    let with_changes = env::args().any(|arg| arg == "--changes");
-
-
-    let session = bluer::Session::new().await?;
-    let adapter_names = session.adapter_names().await?;
-    let adapter_name = adapter_names.first().expect("No Bluetooth adapter present");
-    println!("Discovering devices using Bluetooth adapater {}\n", &adapter_name);
-    let adapter = session.adapter(adapter_name)?;
-    adapter.set_powered(true).await?;
-
-    let device_events = adapter.discover_devices().await?;
-    pin_mut!(device_events);
-
-    let mut all_change_events = SelectAll::new();
-
-    loop {
-        tokio::select! {
-            Some(device_event) = device_events.next() => {
-                match device_event {
-                    AdapterEvent::DeviceAdded(addr) => {
-                        println!("Device added: {}", addr);
-                        if let Err(err) = query_device(&adapter, addr).await {
-                            println!("    Error: {}", &err);
-                        }
-
-                        if with_changes {
-                            let device = adapter.device(addr)?;
-                            let change_events = device.events().await?.map(move |evt| (addr, evt));
-                            all_change_events.push(change_events);
-                        }
-                    }
-                    AdapterEvent::DeviceRemoved(addr) => {
-                        println!("Device removed: {}", addr);
-                    }
-                    _ => (),
-                }
-                println!();
-            }
-            Some((addr, DeviceEvent::PropertyChanged(property))) = all_change_events.next() => {
-                println!("Device changed: {}", addr);
-                println!("    {:?}", property);
-            }
-            else => break
-        }
+    let manager = Manager::new().await?;
+    let adapter_list = manager.adapters().await?;
+    if adapter_list.is_empty() {
+        eprintln!("No Bluetooth adapters found");
     }
 
+    for adapter in adapter_list.iter() {
+        println!("Starting scan...");
+        adapter
+            .start_scan()
+            .await
+            .expect("Can't scan BLE adapter for connected devices...");
+        time::sleep(Duration::from_secs(2)).await;
+        let peripherals = adapter.peripherals().await?;
+        if peripherals.is_empty() {
+            eprintln!("->>> BLE peripheral devices were not found, sorry. Exiting...");
+        } else {
+            // All peripheral devices in range
+            for peripheral in peripherals.iter() {
+                let properties = peripheral.properties().await?;
+                let is_connected = peripheral.is_connected().await?;
+                let local_name = properties
+                    .unwrap()
+                    .local_name
+                    .unwrap_or(String::from("(peripheral name unknown)"));
+                println!(
+                    "Peripheral {:?} is connected: {:?}",
+                    local_name, is_connected
+                );
+                if !is_connected {
+                    println!("Connecting to peripheral {:?}...", &local_name);
+                    if let Err(err) = peripheral.connect().await {
+                        eprintln!("Error connecting to peripheral, skipping: {}", err);
+                        continue;
+                    }
+                }
+                let is_connected = peripheral.is_connected().await?;
+                println!(
+                    "Now connected ({:?}) to peripheral {:?}...",
+                    is_connected, &local_name
+                );
+                let chars = peripheral.discover_characteristics().await?;
+                if is_connected {
+                    println!("Discover peripheral {:?} characteristics...", &local_name);
+                    for characteristic in chars.into_iter() {
+                        println!("{:?}", characteristic);
+                    }
+                    println!("Disconnecting from peripheral {:?}...", &local_name);
+                    peripheral
+                        .disconnect()
+                        .await
+                        .expect("Error disconnecting from BLE peripheral");
+                }
+            }
+        }
+    }
     Ok(())
 }
-/*
 
+
+
+
+
+
+
+
+
+
+
+
+/*
 use core::time;
 use std::{sync::mpsc, thread};
+
+use bluer::Adapter;
 
 async fn query_device(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
     let device = adapter.device(addr)?;
@@ -137,3 +144,4 @@ async fn main() {
     //
     //}
 }*/
+
